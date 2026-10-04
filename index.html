@@ -30,6 +30,13 @@ select{width:100%;padding:12px;border:2px solid var(--ink);border-radius:10px;ba
 #mic.live{background:#c62828;color:#fff;border-color:#c62828}
 #status{min-height:1.5em;margin-top:12px;font-weight:600}
 .you{opacity:.75;font-size:1rem;margin:0 0 6px}
+.alt{margin:0 0 12px}.alt summary{cursor:pointer;font-weight:600}
+textarea{width:100%;margin:8px 0;padding:12px;font:inherit;color:inherit;border:2px solid var(--ink);border-radius:10px;background:var(--card)}
+#go{padding:12px 20px;font-weight:600;border:2px solid var(--ink);border-radius:12px;background:var(--card);cursor:pointer}
+#badge{display:none;color:#fff;font-weight:700;padding:6px 14px;border-radius:999px;margin:0 0 8px}
+#ttl{font-size:1.4rem;margin:0 0 8px}
+#facts{margin:0 0 14px}#facts div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+#hwrap{margin-top:28px}#hwrap h2{font-size:1.1rem}
 button:focus-visible,select:focus-visible{outline:4px solid #1a73e8;outline-offset:2px}
 </style>
 </head>
@@ -62,16 +69,25 @@ button:focus-visible,select:focus-visible{outline:4px solid #1a73e8;outline-offs
   <button class="capture" id="snap">Take a photo</button>
   <input type="file" id="file" accept="image/*" capture="environment" hidden>
   <img id="preview" alt="Your photo">
+  <details class="alt"><summary>No camera? Type or paste a message</summary>
+    <textarea id="msg" rows="4" placeholder="Paste an SMS or letter text here"></textarea>
+    <button id="go">Explain this</button></details>
   <div id="status" role="status" aria-live="polite"></div>
 
   <section id="result" aria-live="polite">
     <p class="you" id="you"></p>
+    <span id="badge"></span>
+    <h2 id="ttl"></h2>
+    <div id="facts"></div>
     <p id="text"></p>
     <div class="row">
       <button id="listen">Listen again</button>
       <button id="mic">Ask a question</button>
+      <button id="wa">Share on WhatsApp</button>
+      <button id="remind" hidden>Add due date to calendar</button>
     </div>
   </section>
+  <section id="hwrap" hidden><h2>Earlier scans</h2><div class="modes" id="hist"></div></section>
 </main>
 
 <script>
@@ -108,10 +124,34 @@ function speak(text) {
   speechSynthesis.speak(u);
 }
 
-function show(text, you = "") {
+let last = null;
+const RISK = {safe: ["Looks safe", "#1b6b3a"], caution: ["Be careful", "#b26a00"], danger: ["Possible scam or danger", "#c62828"]};
+const HK = "saarthi_hist";
+const hist = () => { try { return JSON.parse(localStorage.getItem(HK)) || []; } catch { return []; } };
+function save(d) {
+  if (!d.title) return;
+  try { localStorage.setItem(HK, JSON.stringify([d, ...hist().filter(x => x.spoken !== d.spoken)].slice(0, 8))); } catch {}
+  drawHist();
+}
+function drawHist() {
+  const h = hist(); $("hist").innerHTML = ""; $("hwrap").hidden = !h.length;
+  h.forEach(d => { const b = document.createElement("button"); b.textContent = d.title;
+    b.onclick = () => { context = d.spoken; show(d); }; $("hist").append(b); });
+}
+function show(d, you = "") {
+  last = d.title ? d : last || d;
   $("result").style.display = "block";
-  $("you").textContent = you; $("text").textContent = text;
-  speak(text);
+  $("you").textContent = you; $("text").textContent = d.spoken;
+  const bd = $("badge"), r = RISK[d.risk];
+  bd.style.display = r ? "inline-block" : "none";
+  if (r) { bd.textContent = r[0]; bd.style.background = r[1]; }
+  $("ttl").textContent = d.title || "";
+  $("facts").innerHTML = "";
+  (d.facts || []).forEach(f => { const row = document.createElement("div");
+    row.innerHTML = "<b></b><span></span>"; row.children[0].textContent = f.label;
+    row.children[1].textContent = f.value; $("facts").append(row); });
+  $("remind").hidden = !d.due_date;
+  speak(d.spoken); save(d);
   $("result").scrollIntoView({behavior: "smooth"});
 }
 
@@ -121,20 +161,36 @@ async function post(url, opts) {
   return r.json();
 }
 
+async function run(fd) {
+  $("status").textContent = "Reading… please wait.";
+  fd.append("language", lang().name); fd.append("mode", mode);
+  try {
+    const d = await post("/api/explain", {method: "POST", body: fd});
+    context = d.spoken; $("status").textContent = ""; show(d);
+  } catch (err) { $("status").textContent = "Could not read it. " + err.message; }
+}
 $("file").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   $("preview").src = URL.createObjectURL(f); $("preview").style.display = "block";
-  $("status").textContent = "Reading… please wait.";
-  try {
-    const blob = await shrink(f);
-    const fd = new FormData();
-    fd.append("image", blob, "photo.jpg");
-    fd.append("language", lang().name); fd.append("mode", mode);
-    const d = await post("/api/explain", {method: "POST", body: fd});
-    context = d.text; $("status").textContent = "";
-    show(d.text);
-  } catch (err) { $("status").textContent = "Could not read it. " + err.message + " Try again."; }
-  e.target.value = "";
+  const fd = new FormData(); fd.append("image", await shrink(f), "photo.jpg");
+  e.target.value = ""; run(fd);
+};
+$("go").onclick = () => {
+  const t = $("msg").value.trim(); if (!t) return;
+  const fd = new FormData(); fd.append("text", t); run(fd);
+};
+$("wa").onclick = () => {
+  if (!last) return;
+  const f = (last.facts || []).map(x => x.label + ": " + x.value).join("\n");
+  window.open("https://wa.me/?text=" + encodeURIComponent((last.title ? last.title + "\n" : "") + f + "\n\n" + last.spoken + "\n\nExplained by Saarthi"), "_blank");
+};
+$("remind").onclick = () => {
+  if (!last || !last.due_date) return;
+  const d = last.due_date.replace(/-/g, ""), now = new Date().toISOString().replace(/[-:]|\.\d+/g, "");
+  const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:" + Date.now() + "@saarthi\r\nDTSTAMP:" + now +
+    "\r\nDTSTART;VALUE=DATE:" + d + "\r\nSUMMARY:" + (last.title || "Due date") + " (Saarthi)\r\nEND:VEVENT\r\nEND:VCALENDAR";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([ics], {type: "text/calendar"})); a.download = "reminder.ics"; a.click();
 };
 
 $("listen").onclick = () => speak($("text").textContent);
@@ -152,12 +208,13 @@ $("mic").onclick = () => {
     try {
       const d = await post("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({question: q, context, language: lang().name, mode})});
-      $("status").textContent = ""; show(d.text, "You asked: " + q);
+      $("status").textContent = ""; show({spoken: d.text}, "You asked: " + q);
     } catch (err) { $("status").textContent = err.message; }
   };
   recog.onend = () => { recog = null; $("mic").classList.remove("live"); $("mic").textContent = "Ask a question"; };
   recog.start();
 };
+drawHist();
 </script>
 </body>
 </html>
