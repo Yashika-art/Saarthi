@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saarthi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hind:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#14213d;--paper:#f6f4ef;--card:#fff;--gold:#f4b400;--line:#d9d5c8;--ok:#1b6b3a}
+@media (prefers-color-scheme:dark){:root{--ink:#f6f4ef;--paper:#10182b;--card:#1a2542;--line:#34426b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:20px/1.5 Hind,system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:2rem;margin:0 0 4px}
+.sub{margin:0 0 20px;opacity:.8}
+label{font-weight:600;display:block;margin:16px 0 6px}
+select,button{font:inherit;color:inherit}
+select{width:100%;padding:12px;border:2px solid var(--ink);border-radius:10px;background:var(--card)}
+.modes{display:flex;flex-wrap:wrap;gap:8px}
+.modes button{padding:10px 16px;border:2px solid var(--ink);border-radius:999px;background:var(--card);cursor:pointer}
+.modes button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.capture{display:block;width:100%;margin:24px 0;padding:28px 12px;font-size:1.5rem;font-weight:700;text-align:center;
+ background:var(--gold);color:#14213d;border:3px solid var(--ink);border-radius:20px;cursor:pointer}
+#preview{display:none;width:100%;max-height:260px;object-fit:contain;border-radius:12px;border:2px solid var(--line);background:#000}
+#result{display:none;margin-top:20px;padding:18px;background:var(--card);border:2px solid var(--line);border-radius:16px}
+#text{white-space:pre-wrap;font-size:1.25rem;margin:0 0 14px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row button{flex:1;min-width:140px;padding:14px;font-weight:600;border:2px solid var(--ink);border-radius:12px;background:var(--card);cursor:pointer}
+#mic.live{background:#c62828;color:#fff;border-color:#c62828}
+#status{min-height:1.5em;margin-top:12px;font-weight:600}
+.you{opacity:.75;font-size:1rem;margin:0 0 6px}
+button:focus-visible,select:focus-visible{outline:4px solid #1a73e8;outline-offset:2px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Saarthi</h1>
+  <p class="sub">Show me a bill, medicine or letter. I will explain it.</p>
+
+  <label for="lang">Language</label>
+  <select id="lang">
+    <option value="Hindi|hi-IN">हिन्दी (Hindi)</option>
+    <option value="English|en-IN">English</option>
+    <option value="Bengali|bn-IN">বাংলা (Bengali)</option>
+    <option value="Tamil|ta-IN">தமிழ் (Tamil)</option>
+    <option value="Telugu|te-IN">తెలుగు (Telugu)</option>
+    <option value="Marathi|mr-IN">मराठी (Marathi)</option>
+    <option value="Gujarati|gu-IN">ગુજરાતી (Gujarati)</option>
+    <option value="Kannada|kn-IN">ಕನ್ನಡ (Kannada)</option>
+  </select>
+
+  <label id="mlabel">What is it?</label>
+  <div class="modes" role="group" aria-labelledby="mlabel" id="modes">
+    <button data-m="auto" aria-pressed="true">Not sure</button>
+    <button data-m="medicine" aria-pressed="false">Medicine</button>
+    <button data-m="bill" aria-pressed="false">Bill</button>
+    <button data-m="notice" aria-pressed="false">Letter</button>
+    <button data-m="scam" aria-pressed="false">Check for scam</button>
+  </div>
+
+  <button class="capture" id="snap">Take a photo</button>
+  <input type="file" id="file" accept="image/*" capture="environment" hidden>
+  <img id="preview" alt="Your photo">
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <section id="result" aria-live="polite">
+    <p class="you" id="you"></p>
+    <p id="text"></p>
+    <div class="row">
+      <button id="listen">Listen again</button>
+      <button id="mic">Ask a question</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let mode = "auto", context = "", recog = null;
+const lang = () => { const [name, code] = $("lang").value.split("|"); return {name, code}; };
+
+$("modes").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  mode = b.dataset.m;
+  document.querySelectorAll("#modes button").forEach(x => x.setAttribute("aria-pressed", x === b));
+};
+$("snap").onclick = () => $("file").click();
+
+function shrink(file, max = 1280) {
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = img.width * s; c.height = img.height * s;
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => res(b), "image/jpeg", 0.85);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function speak(text) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang().code; u.rate = 0.9;
+  speechSynthesis.speak(u);
+}
+
+function show(text, you = "") {
+  $("result").style.display = "block";
+  $("you").textContent = you; $("text").textContent = text;
+  speak(text);
+  $("result").scrollIntoView({behavior: "smooth"});
+}
+
+async function post(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Something went wrong");
+  return r.json();
+}
+
+$("file").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("preview").src = URL.createObjectURL(f); $("preview").style.display = "block";
+  $("status").textContent = "Reading… please wait.";
+  try {
+    const blob = await shrink(f);
+    const fd = new FormData();
+    fd.append("image", blob, "photo.jpg");
+    fd.append("language", lang().name); fd.append("mode", mode);
+    const d = await post("/api/explain", {method: "POST", body: fd});
+    context = d.text; $("status").textContent = "";
+    show(d.text);
+  } catch (err) { $("status").textContent = "Could not read it. " + err.message + " Try again."; }
+  e.target.value = "";
+};
+
+$("listen").onclick = () => speak($("text").textContent);
+
+$("mic").onclick = () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { $("status").textContent = "Voice questions need Chrome or Edge."; return; }
+  if (recog) { recog.stop(); return; }
+  speechSynthesis.cancel();
+  recog = new SR(); recog.lang = lang().code;
+  $("mic").classList.add("live"); $("mic").textContent = "Listening… tap to stop";
+  recog.onresult = async ev => {
+    const q = ev.results[0][0].transcript;
+    $("status").textContent = "Thinking…";
+    try {
+      const d = await post("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({question: q, context, language: lang().name, mode})});
+      $("status").textContent = ""; show(d.text, "You asked: " + q);
+    } catch (err) { $("status").textContent = err.message; }
+  };
+  recog.onend = () => { recog = null; $("mic").classList.remove("live"); $("mic").textContent = "Ask a question"; };
+  recog.start();
+};
+</script>
+</body>
+</html>
