@@ -16,3 +16,14 @@ Open http://localhost:8000. Camera and microphone need HTTPS on phones (use ngro
 
 ## Stack
 FastAPI, Claude vision API, browser Web Speech API (speech-to-text and text-to-speech).
+
+## Features
+- Photo or pasted-text input in 8 Indian languages, spoken aloud
+- Risk badge (safe / be careful / possible scam) with the 4 key facts
+- Scam-check mode, medicine, bill and letter modes
+- Voice follow-up questions
+- Share on WhatsApp and add the due date to your calendar (.ics)
+- Scan history stored on the device, per-IP rate limiting
+
+## Future scope
+Offline mode, more languages, a WhatsApp bot so users can forward photos directly, and family-member alerts for urgent dues.
