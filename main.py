@@ -6,10 +6,36 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import httpx
 from anthropic import Anthropic
 
 load_dotenv()
-client = Anthropic()  # reads ANTHROPIC_API_KEY
+client = Anthropic() if os.getenv("ANTHROPIC_API_KEY") else None
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+def generate(system_text, messages, max_tokens, as_json=False):
+    """Uses Claude if ANTHROPIC_API_KEY is set, otherwise free Gemini via GEMINI_API_KEY."""
+    if client is None:
+        if not GEMINI_KEY:
+            raise RuntimeError("No API key set. Add GEMINI_API_KEY (free) or ANTHROPIC_API_KEY.")
+        def part(b):
+            if isinstance(b, str): return {"text": b}
+            if b["type"] == "text": return {"text": b["text"]}
+            src = b["source"]; return {"inline_data": {"mime_type": src["media_type"], "data": src["data"]}}
+        contents = [{"role": "model" if m["role"] == "assistant" else "user",
+                     "parts": [part(b) for b in (m["content"] if isinstance(m["content"], list) else [m["content"]])]}
+                    for m in messages]
+        cfg = {"maxOutputTokens": 2048, "thinkingConfig": {"thinkingBudget": 0}}
+        if as_json: cfg["responseMimeType"] = "application/json"
+        r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                       headers={"x-goog-api-key": GEMINI_KEY},
+                       json={"system_instruction": {"parts": [{"text": system_text}]}, "contents": contents,
+                             "generationConfig": cfg}, timeout=90)
+        if r.status_code != 200: raise RuntimeError(r.text[:300])
+        return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"]).strip()
+    resp = client.messages.create(model=MODEL, max_tokens=max_tokens, system=system_text, messages=messages)
+    return text_of(resp)
 MODEL = os.getenv("MODEL", "claude-sonnet-5-5")
 MAX_BYTES = 8 * 1024 * 1024
 LIMIT, WINDOW = 25, 3600  # requests per IP per hour (protects your credits)
@@ -82,11 +108,10 @@ async def explain(req: Request, image: Optional[UploadFile] = File(None), text: 
     else:
         content.append({"type": "text", "text": "Please explain this to me."})
     try:
-        resp = client.messages.create(model=MODEL, max_tokens=800, system=system(language, mode),
-                                      messages=[{"role": "user", "content": content}])
+        raw = generate(system(language, mode), [{"role": "user", "content": content}], 800, True)
     except Exception as e:
         raise HTTPException(502, f"AI error: {e}")
-    return parse(text_of(resp))
+    return parse(raw)
 
 class Ask(BaseModel):
     question: str
@@ -98,14 +123,13 @@ class Ask(BaseModel):
 async def ask(req: Request, body: Ask):
     limit(req)
     try:
-        resp = client.messages.create(
-            model=MODEL, max_tokens=500, system=system(body.language, body.mode, structured=False),
-            messages=[{"role": "user", "content": "I showed you a document. Explain it."},
-                      {"role": "assistant", "content": body.context},
-                      {"role": "user", "content": body.question}])
+        out = generate(system(body.language, body.mode, structured=False),
+                       [{"role": "user", "content": "I showed you a document. Explain it."},
+                        {"role": "assistant", "content": body.context},
+                        {"role": "user", "content": body.question}], 500)
     except Exception as e:
         raise HTTPException(502, f"AI error: {e}")
-    return {"text": text_of(resp)}
+    return {"text": out}
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
