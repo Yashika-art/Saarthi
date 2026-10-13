@@ -6,13 +6,7 @@ Hindi, Bengali, Tamil and more, flags dates, warnings and scams, and answers fol
 Built for HackNowa Global Hackathon 2026 (Inclusive Technology).
 
 ## Run
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # add your ANTHROPIC_API_KEY
-uvicorn main:app --reload
-```
-Open http://localhost:8000. Camera and microphone need HTTPS on phones (use ngrok or deploy to Render).
+Live demo (built-in Claude AI, no API key): https://claude.ai/artifact/5BppswjnbCQwzhQhEa3uom
 
 ## Stack
 FastAPI, Claude vision API, browser Web Speech API (speech-to-text and text-to-speech).
